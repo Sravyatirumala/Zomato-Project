@@ -1,97 +1,112 @@
 pipeline {
     agent any
+
     tools {
         jdk 'jdk20'
         nodejs 'nodeJS'
     }
+
     environment {
-        SCANNER_HOME=tool 'sonar-scanner'
+        SCANNER_HOME = tool 'sonar-scanner'
     }
+
     stages {
-        stage ("clean workspace") {
+        stage("Clean Workspace") {
             steps {
                 cleanWs()
             }
         }
-        stage ("Git Checkout") {
+
+        stage("Git Checkout") {
             steps {
                 git 'https://github.com/Sravyatirumala/Zomato-Project.git'
             }
         }
-        stage("Sonarqube Analysis"){
-            steps{
+
+        stage("Sonarqube Analysis") {
+            steps {
                 withSonarQubeEnv('sonar-server') {
-                    sh ''' $SCANNER_HOME/bin/sonar-scanner\
-                    -Dsonar.projectName=zomato \
-                    -Dsonar.projectKey=zomato '''
+                    sh '''${SCANNER_HOME}/bin/sonar-scanner \
+                        -Dsonar.projectName=zomato \
+                        -Dsonar.projectKey=zomato'''
                 }
             }
         }
-        stage("Code Quality Gate"){
-           steps {
+
+        stage("Code Quality Gate") {
+            steps {
                 script {
-                    waitForQualityGate abortPipeline: false, credentialsId:'Sonar-token' 
+                    waitForQualityGate abortPipeline: false, credentialsId: 'Sonar-token'
                 }
-            } 
+            }
         }
+
         stage("Install NPM Dependencies") {
             steps {
                 sh "npm install"
             }
         }
-        stage('OWASP FS SCAN') {
+
+        stage("OWASP FS SCAN") {
             steps {
                 dependencyCheck additionalArguments: '--scan ./ --disableYarnAudit --disableNodeAudit -n', odcInstallation: 'DP-Check'
                 dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
             }
-      }
-        stage ("Trivy File Scan") {
+        }
+
+        stage("Trivy File Scan") {
             steps {
                 sh "trivy fs . > trivy.txt"
             }
         }
-        stage ("Build Docker Image") {
+
+        stage("Build Docker Image") {
             steps {
                 sh "docker build -t zomato ."
             }
         }
-        stage ("Tag & Push to DockerHub") {
+
+        stage("Tag & Push to DockerHub") {
             steps {
                 script {
-                    withDockerRegistry(credentialsId: ‘Docker-creds’) {
-                        sh "docker tag zomato sravyatirumala/zomato:latest "
-                        sh "docker push sravyatirumala/zomato:latest "
+                    withDockerRegistry(credentialsId: 'Docker-creds') {
+                        sh "docker tag zomato sravyatirumala/zomato:latest"
+                        sh "docker push sravyatirumala/zomato:latest"
                     }
                 }
             }
         }
-        stage('Docker Scout Image') {
+
+        stage("Docker Scout Image") {
             steps {
-                script{
+                script {
                     withCredentials([usernamePassword(credentialsId: 'Docker-creds', usernameVariable: 'DOCKERHUB_USERNAME', passwordVariable: 'DOCKERHUB_PASSWORD')]) {
-                   sh 'echo "$DOCKERHUB_PASSWORD" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin'
-                   sh 'docker-scout quickview sravyatirumala/zomato:latest'
-                       }
+                        sh 'echo "$DOCKERHUB_PASSWORD" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin'
+                        sh 'docker-scout quickview sravyatirumala/zomato:latest'
+                    }
                 }
+            }
         }
-        stage ("Deploy to Container") {
+
+        stage("Deploy to Container") {
             steps {
                 sh 'docker run -d --name zomato -p 3000:3000 sravyatirumala/zomato:latest'
             }
         }
-    }
-     stage("Notify") {
-    steps {
-        script {
-            emailext(
-                attachLog: true,
-                subject: "'${currentBuild.result}'",
-                body: "...",
-                to: 'tvsravya95@gmail.com',
-                mimeType: 'text/html',
-                attachmentsPattern: 'trivy.txt'
-                 )
-             }
+
+        stage("Notify") {
+            steps {
+                script {
+                    emailext(
+                        attachLog: true,
+                        subject: "'${currentBuild.result}'",
+                        body: "Build completed with status: ${currentBuild.result}<br/>Job: ${env.JOB_NAME}<br/>Build: ${env.BUILD_NUMBER}<br/>URL: ${env.BUILD_URL}",
+                        to: 'tvsravya95@gmail.com',
+                        mimeType: 'text/html',
+                        attachmentsPattern: 'trivy.txt'
+                    )
+                }
+            }
         }
     }
 }
